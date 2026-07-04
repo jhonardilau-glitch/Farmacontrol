@@ -1,0 +1,15 @@
+{
+  "name": "drogueria-jym2",
+  "version": "2.0.0",
+  "description": "Drogueria JYM 2 - Sistema de Inventario y Facturacion",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
