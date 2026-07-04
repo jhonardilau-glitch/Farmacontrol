@@ -198,18 +198,41 @@ tr:hover td{background:#fdf5f7;}
     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;">
       <div class="panel" style="flex:1;min-width:280px;">
         <h2>Agregar al carrito</h2>
-        <div class="fi" style="flex-direction:column;align-items:stretch;">
-          <select id="selProd" style="width:100%;"></select>
-          <div style="display:flex;gap:8px;">
-            <input id="ventaCant" type="number" min="1" value="1" style="width:80px;"/>
-            <button class="btn" id="btnAddCart" style="flex:1;">➕ Agregar</button>
+
+        <!-- ESCANER EN VENTAS -->
+        <div style="margin-bottom:10px;">
+          <div style="display:flex;gap:8px;margin-bottom:8px;">
+            <button class="btn g" id="btnVentaScanOn" style="flex:1;">🔫 Activar escaner</button>
+            <button class="btn gr" id="btnVentaScanOff" style="display:none;flex:1;">⏹ Detener</button>
+          </div>
+          <div id="ventaScanField" style="display:none;">
+            <div style="display:flex;gap:8px;align-items:center;background:#f0fff4;border:2px solid #1a7a1a;border-radius:8px;padding:8px;">
+              <div class="dot on pulse"></div>
+              <input id="campoVentaScan" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                placeholder="Escanea o escribe el codigo..."
+                style="flex:1;border:none;background:transparent;font-size:16px;font-weight:700;outline:none;letter-spacing:1px;min-height:36px;"/>
+              <button class="btn sm b" id="btnVentaBuscar">Buscar</button>
+            </div>
+            <div id="ventaScanMsg" style="font-size:12px;margin-top:4px;"></div>
           </div>
         </div>
+
+        <div style="border-top:1px solid #f0f0f0;padding-top:10px;margin-bottom:8px;">
+          <div style="font-size:12px;color:#888;margin-bottom:6px;">O selecciona manualmente:</div>
+          <div class="fi" style="flex-direction:column;align-items:stretch;">
+            <select id="selProd" style="width:100%;"></select>
+            <div style="display:flex;gap:8px;">
+              <input id="ventaCant" type="number" min="1" value="1" style="width:80px;"/>
+              <button class="btn" id="btnAddCart" style="flex:1;">Agregar</button>
+            </div>
+          </div>
+        </div>
+
         <div id="cart"></div>
         <div class="total-row"><span>Total:</span><span id="totalVenta">$0</span></div>
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-          <button class="btn g" id="btnVender" style="flex:1;">✅ Confirmar venta</button>
-          <button class="btn gr sm" id="btnLimpiarCart">🗑</button>
+          <button class="btn g" id="btnVender" style="flex:1;">Confirmar venta</button>
+          <button class="btn gr sm" id="btnLimpiarCart">Limpiar</button>
         </div>
       </div>
       <div class="panel" style="flex:1;min-width:280px;">
@@ -454,6 +477,7 @@ function irSec(id) {
   });
   if (id === 'res') renderResumen();
   if (id !== 'scan') apagaScan();
+  if (id !== 'venta') apagarVentaScan();
 }
 
 document.querySelectorAll('[data-sec]').forEach(btn => {
@@ -585,6 +609,126 @@ document.getElementById('btnExportCSV').onclick = () => {
   });
   a.click();
 };
+
+// ════════════════════════════════════════════════════════
+//  ESCANER EN VENTAS
+// ════════════════════════════════════════════════════════
+let ventaScanActivo = false;
+let _ventaScanTimer = null;
+
+function encenderVentaScan() {
+  ventaScanActivo = true;
+  document.getElementById('btnVentaScanOn').style.display = 'none';
+  document.getElementById('btnVentaScanOff').style.display = 'flex';
+  document.getElementById('ventaScanField').style.display = 'block';
+  const campo = document.getElementById('campoVentaScan');
+  campo.removeAttribute('readonly');
+  campo.value = '';
+  campo.focus();
+}
+
+function apagarVentaScan() {
+  ventaScanActivo = false;
+  document.getElementById('btnVentaScanOn').style.display = 'flex';
+  document.getElementById('btnVentaScanOff').style.display = 'none';
+  document.getElementById('ventaScanField').style.display = 'none';
+  document.getElementById('ventaScanMsg').textContent = '';
+}
+
+document.getElementById('btnVentaScanOn').onclick  = encenderVentaScan;
+document.getElementById('btnVentaScanOff').onclick = apagarVentaScan;
+
+const campoVentaScan = document.getElementById('campoVentaScan');
+
+function procesarCodigoVenta(codigo) {
+  if (!codigo || codigo.length < 2) return;
+  if (navigator.vibrate) navigator.vibrate(80);
+
+  // Buscar por codigo o nombre
+  const prod = db.inventario.find(i =>
+    (i.codigo && i.codigo === codigo) ||
+    i.nombre.toLowerCase() === codigo.toLowerCase()
+  );
+
+  const msg = document.getElementById('ventaScanMsg');
+
+  if (prod) {
+    if (prod.cantidad <= 0) {
+      msg.style.color = '#c00';
+      msg.textContent = 'Sin stock: ' + prod.nombre;
+      return;
+    }
+    // Agregar al carrito
+    const existe = carrito.find(ci => ci.id === prod.id);
+    if (existe) {
+      if (existe.cant >= prod.cantidad) {
+        msg.style.color = '#c00';
+        msg.textContent = 'Stock maximo alcanzado: ' + prod.nombre;
+        return;
+      }
+      existe.cant += 1;
+    } else {
+      carrito.push({ id: prod.id, nombre: prod.nombre, cant: 1, precio: prod.precio });
+    }
+    renderCart();
+    msg.style.color = '#1a7a1a';
+    msg.textContent = 'Agregado: ' + prod.nombre + ' — ' + money(prod.precio);
+    // Limpiar mensaje despues de 2s
+    clearTimeout(campoVentaScan._msgTimer);
+    campoVentaScan._msgTimer = setTimeout(() => { msg.textContent = ''; }, 2000);
+  } else {
+    msg.style.color = '#c00';
+    msg.textContent = 'Codigo no encontrado: ' + codigo + '. Registralo en Inventario primero.';
+  }
+
+  campoVentaScan.value = '';
+  campoVentaScan.focus();
+}
+
+campoVentaScan.addEventListener('input', function() {
+  if (!ventaScanActivo) return;
+  clearTimeout(_ventaScanTimer);
+  _ventaScanTimer = setTimeout(() => {
+    const cod = this.value.trim();
+    this.value = '';
+    if (cod.length > 1) procesarCodigoVenta(cod);
+  }, 120);
+});
+
+campoVentaScan.addEventListener('keydown', function(e) {
+  if (!ventaScanActivo) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    clearTimeout(_ventaScanTimer);
+    const cod = this.value.trim();
+    this.value = '';
+    if (cod.length > 1) procesarCodigoVenta(cod);
+  }
+});
+
+campoVentaScan.onclick = function() {
+  this.removeAttribute('readonly');
+  this.focus();
+};
+
+document.getElementById('btnVentaBuscar').onclick = () => {
+  const cod = campoVentaScan.value.trim();
+  campoVentaScan.value = '';
+  if (cod) procesarCodigoVenta(cod);
+};
+
+// Mantener foco en el campo de venta si el escaner está activo
+document.addEventListener('click', function(e) {
+  if (!ventaScanActivo) return;
+  const tag = e.target.tagName;
+  if (!['INPUT','BUTTON','SELECT','TEXTAREA','A'].includes(tag)) {
+    campoVentaScan.removeAttribute('readonly');
+    campoVentaScan.focus();
+  }
+});
+
+// Si cambias de seccion, apagar el escaner de ventas
+const _irSecOrig = irSec;
 
 // ════════════════════════════════════════════════════════
 //  VENTAS
