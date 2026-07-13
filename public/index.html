@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
-<title>Droguería JYM 2</title>
+<title>FarmaControl</title>
 <link rel="manifest" href="manifest.json"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
@@ -134,8 +134,8 @@ tr:hover td{background:#fdf5f7;}
 <!-- LOGIN -->
 <div id="loginOverlay" class="overlay">
   <div class="login-card">
-    <div class="login-logo"><img src="fondo/drogueriajym2.png" alt="JYM2" onerror="this.style.display='none'"></div>
-    <div class="lc-title">Droguería JYM 2</div>
+    <div class="login-logo"><img src="fondo/drogueriajym2.png" alt="FarmaControl" onerror="this.style.display='none'"></div>
+    <div class="lc-title" id="nombreNegocio">FarmaControl</div>
     <div class="lc-sub">Sistema de Inventario y Facturación</div>
     <div class="lc-form">
       <input id="lUser" type="text" placeholder="Usuario" autocomplete="username"/>
@@ -143,14 +143,14 @@ tr:hover td{background:#fdf5f7;}
       <button class="btn" id="btnLogin">Ingresar</button>
       <button class="btn gr" id="btnDemo">Modo demo</button>
       <div id="lErr" style="color:#c00;font-size:12px;display:none;">Usuario o contraseña incorrectos</div>
-      <div style="font-size:11px;color:#aaa">admin / 12345</div>
+      <div id="loginErr2" style="font-size:11px;color:#aaa;display:none;"></div>
     </div>
   </div>
 </div>
 
 <!-- TOPBAR -->
 <div class="topbar">
-  <div class="tb-brand">💊 <span>JYM 2</span></div>
+  <div class="tb-brand">💊 <span id="brandNombre">FarmaControl</span></div>
   <button class="nb on" data-sec="inv">Inventario</button>
   <button class="nb" data-sec="venta">Ventas</button>
   <button class="nb" data-sec="scan">🔫 Escanear</button>
@@ -422,25 +422,55 @@ function setConn(ok) {
 // ════════════════════════════════════════════════════════
 //  LOGIN
 // ════════════════════════════════════════════════════════
-const USERS = { admin: '12345', jym: 'jym2024' };
-
 function loginInit() {
-  sesion = sessionStorage.getItem('jym2_user');
+  sesion = sessionStorage.getItem('fc_user');
+  // Cargar config del negocio (nombre)
+  fetch('/api/config').then(r => r.json()).then(cfg => {
+    if (cfg.nombre) {
+      document.getElementById('nombreNegocio').textContent = cfg.nombre;
+      document.getElementById('brandNombre').textContent = cfg.nombre;
+      document.title = cfg.nombre;
+    }
+  }).catch(() => {});
   if (sesion) { showApp(); return; }
   document.getElementById('loginOverlay').style.display = 'flex';
+}
+
+async function doLogin(user, pass) {
+  const btn = document.getElementById('btnLogin');
+  btn.textContent = 'Verificando...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user, pass })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      sessionStorage.setItem('fc_user', data.user);
+      sessionStorage.setItem('fc_rol', data.rol);
+      sesion = data.user;
+      document.getElementById('loginOverlay').style.display = 'none';
+      showApp();
+    } else {
+      document.getElementById('lErr').style.display = 'block';
+      document.getElementById('lErr').textContent = 'Usuario o contraseña incorrectos';
+    }
+  } catch(e) {
+    document.getElementById('lErr').style.display = 'block';
+    document.getElementById('lErr').textContent = 'Error de conexión con el servidor';
+  } finally {
+    btn.textContent = 'Ingresar';
+    btn.disabled = false;
+  }
 }
 
 document.getElementById('btnLogin').onclick = () => {
   const u = document.getElementById('lUser').value.trim();
   const p = document.getElementById('lPass').value;
-  if (USERS[u] && USERS[u] === p) {
-    sessionStorage.setItem('jym2_user', u);
-    sesion = u;
-    document.getElementById('loginOverlay').style.display = 'none';
-    showApp();
-  } else {
-    document.getElementById('lErr').style.display = 'block';
-  }
+  if (!u || !p) { document.getElementById('lErr').style.display = 'block'; return; }
+  doLogin(u, p);
 };
 
 document.getElementById('lPass').addEventListener('keydown', e => {
@@ -448,14 +478,12 @@ document.getElementById('lPass').addEventListener('keydown', e => {
 });
 
 document.getElementById('btnDemo').onclick = () => {
-  sessionStorage.setItem('jym2_user', 'demo');
-  sesion = 'demo';
-  document.getElementById('loginOverlay').style.display = 'none';
-  showApp();
+  doLogin('demo', 'demo123');
 };
 
 document.getElementById('btnOut').onclick = () => {
-  sessionStorage.removeItem('jym2_user');
+  sessionStorage.removeItem('fc_user');
+  sessionStorage.removeItem('fc_rol');
   location.reload();
 };
 
@@ -605,7 +633,7 @@ document.getElementById('btnExportCSV').onclick = () => {
   const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
   const a = Object.assign(document.createElement('a'), {
     href: 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv),
-    download: `inventario_jym2_${new Date().toISOString().slice(0,10)}.csv`
+    download: `inventario_farmacontrol_${new Date().toISOString().slice(0,10)}.csv`
   });
   a.click();
 };
@@ -643,6 +671,8 @@ const campoVentaScan = document.getElementById('campoVentaScan');
 function procesarCodigoVenta(codigo) {
   if (!codigo || codigo.length < 2) return;
   if (navigator.vibrate) navigator.vibrate(80);
+  // Enviar al PC en tiempo real (prioridad maxima, antes del DOM)
+  wsSend({ t: 'scan_venta', codigo, ts: Date.now() });
 
   // Buscar por codigo o nombre
   const prod = db.inventario.find(i =>
