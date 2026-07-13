@@ -69,6 +69,27 @@ function guardarDB() {
 
 cargarDB();
 
+// ── Configuración del negocio (desde variables de entorno) ───────────────────
+// En Railway: Settings → Variables → agregar cada una
+const CONFIG = {
+  nombre:   process.env.FC_NOMBRE   || 'FarmaControl',
+  usuario1: process.env.FC_USER1    || 'admin',
+  pass1:    process.env.FC_PASS1    || 'farma2025',
+  rol1:     process.env.FC_ROL1     || 'admin',
+  usuario2: process.env.FC_USER2    || 'cajero',
+  pass2:    process.env.FC_PASS2    || 'caja2025',
+  rol2:     process.env.FC_ROL2     || 'cajero',
+  // Usuario demo siempre disponible (solo lectura en el futuro)
+  demoPass: process.env.FC_DEMO_PASS || 'demo123',
+};
+
+function validarLogin(user, pass) {
+  if (user === CONFIG.usuario1 && pass === CONFIG.pass1) return { ok: true, user, rol: CONFIG.rol1 };
+  if (user === CONFIG.usuario2 && pass === CONFIG.pass2) return { ok: true, user, rol: CONFIG.rol2 };
+  if (user === 'demo' && pass === CONFIG.demoPass)       return { ok: true, user: 'demo', rol: 'demo' };
+  return { ok: false };
+}
+
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -93,6 +114,30 @@ const server = http.createServer((req, res) => {
   if (url === '/api/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true, productos: db.inventario.length, ts: Date.now() }));
+  }
+
+  // Config pública del negocio (solo nombre, sin credenciales)
+  if (url === '/api/config') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
+    return res.end(JSON.stringify({ nombre: CONFIG.nombre }));
+  }
+
+  // Login — valida credenciales y responde con rol
+  if (url === '/api/login' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { user, pass } = JSON.parse(body);
+        const result = validarLogin((user||'').trim(), pass||'');
+        res.writeHead(result.ok ? 200 : 401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch(e) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false }));
+      }
+    });
+    return;
   }
 
   // Archivos estáticos
@@ -144,6 +189,9 @@ wss.on('connection', (ws, req) => {
       // PRIORIDAD MAXIMA — codigo escaneado, reenvio instantaneo
       case 'scan':
         broadcast({ t: 'scan', codigo: m.codigo, ts: m.ts }, ws);
+        break;
+      case 'scan_venta':
+        broadcast({ t: 'scan_venta', codigo: m.codigo, ts: m.ts }, ws);
         break;
 
       // Nuevo producto
